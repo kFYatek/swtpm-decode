@@ -188,6 +188,49 @@ def decode_libtpms_persistent_data(data: bytes, offset: list[int]):
     return result
 
 
+def decode_libtpms_drbg_state(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x6fe83ea1)
+    result['reseedCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['magic'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['seed'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    size = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 4 * size + 2
+    result['lastValue'] = base64.b64encode(data[offset[0] - 4 * size:offset[0]]).decode()
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_orderly_data_selfHealTimer(data: bytes):
+    result = {}
+    offset = [0]
+    result['selfHealTimer'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['lockoutTimer'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['time'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    return result
+
+
+def decode_libtpms_orderly_data(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x56657887)
+    result['clock'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['clockSafe'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    result['drbgState'] = decode_libtpms_drbg_state(data, offset)
+    result.update(
+        libtpms_block_skip_read(data, offset, decode_libtpms_orderly_data_selfHealTimer) or {})
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
     result = {}
     offset = [0]
@@ -196,7 +239,7 @@ def decode_libtpms_persistent_all(data: bytes):
         result['profile'] = json.loads(decode_libtpms_string(data, offset))
     decode_libtpms_compile_constants(data, offset)
     result['persistent_data'] = decode_libtpms_persistent_data(data, offset)
-    # TODO ORDERLY_DATA -> check readSuState depending on version
+    result['orderly_data'] = decode_libtpms_orderly_data(data, offset)
     # TODO STATE_RESET_DATA
     # TODO STATE_CLEAR_DATA
     # TODO INDEX_ORDERLY_RAM
