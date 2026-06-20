@@ -340,6 +340,28 @@ def decode_libtpms_state_clear_data(data: bytes, offset: list[int]):
     return result
 
 
+def decode_libtpms_index_orderly_ram(data: bytes, offset: list[int]):
+    result = []
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x5346feab)
+    sourceside_size = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    max_offset = offset[0] + sourceside_size
+    while offset[0] < max_offset:
+        result1 = {}
+        size = struct.unpack_from('!L', data, offset[0])[0]
+        offset[0] += 4
+        if size == 0:
+            break
+        result1['handle'] = struct.unpack_from('!L', data, offset[0])[0]
+        offset[0] += 4
+        result1['attributes'] = struct.unpack_from('!L', data, offset[0])[0]
+        offset[0] += 4
+        result1['data'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
     result = {}
     offset = [0]
@@ -352,7 +374,7 @@ def decode_libtpms_persistent_all(data: bytes):
     if hdr.version < 3 or result['persistent_data']['orderlyState'] % 16384 == 1:
         result['state_reset_data'] = decode_libtpms_state_reset_data(data, offset)
         result['state_clear_data'] = decode_libtpms_state_clear_data(data, offset)
-    # TODO INDEX_ORDERLY_RAM
+    result['index_orderly_ram'] = decode_libtpms_index_orderly_ram(data, offset)
     # TODO USER_NVRAM
     # TODO skip future versions
     return result
