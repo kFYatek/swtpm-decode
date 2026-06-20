@@ -236,8 +236,8 @@ def decode_libtpms_state_reset_data_commitCounter(data: bytes):
     offset = [0]
     result['commitCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
     offset[0] += 8
-    result['commitNonce'] = decode_libtpms_drbg_state(data, offset)
-    result['commitArray'] = decode_libtpms_drbg_state(data, offset)
+    result['commitNonce'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['commitArray'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
     return result
 
 
@@ -260,7 +260,7 @@ def decode_libtpms_state_reset_data(data: bytes, offset: list[int]):
     result['objectContextID'] = struct.unpack_from('!Q', data, offset[0])[0]
     offset[0] += 8
     size = struct.unpack_from('!H', data, offset[0])[0]
-    offset[0] += 1
+    offset[0] += 2
     contextArray = []
     if hdr.version <= 3:
         for i in range(size):
@@ -290,6 +290,56 @@ def decode_libtpms_state_reset_data(data: bytes, offset: list[int]):
     return result
 
 
+def decode_libtpms_pcr_save(data: bytes, offset: list[int]):
+    result = []
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x7372eabc)
+    arraysize = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    while True:
+        result1 = {}
+        result1['algid'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+        if result1['algid'] == 0x10:
+            break
+        result1['hash'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+        result.append(result1)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_pcr_authvalues(data: bytes, offset: list[int]):
+    result = []
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x6be82eaf)
+    arraysize = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    for i in range(arraysize):
+        result.append(base64.b64encode(decode_libtpms_string(data, offset)).decode())
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_state_clear_data(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x98897667)
+    result['shEnable'] = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    result['ehEnable'] = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    result['phEnableNV'] = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    result['platformAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['platformPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['platformAuth'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['pcrSave'] = decode_libtpms_pcr_save(data, offset)
+    result['pcrAuthValues'] = decode_libtpms_pcr_authvalues(data, offset)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
     result = {}
     offset = [0]
@@ -301,7 +351,7 @@ def decode_libtpms_persistent_all(data: bytes):
     result['orderly_data'] = decode_libtpms_orderly_data(data, offset)
     if hdr.version < 3 or result['persistent_data']['orderlyState'] % 16384 == 1:
         result['state_reset_data'] = decode_libtpms_state_reset_data(data, offset)
-    # TODO STATE_CLEAR_DATA
+        result['state_clear_data'] = decode_libtpms_state_clear_data(data, offset)
     # TODO INDEX_ORDERLY_RAM
     # TODO USER_NVRAM
     # TODO skip future versions
