@@ -1,15 +1,208 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import argparse
+import base64
 import json
 import struct
 import sys
 import typing
 
 
+class LibtpmsHeader(typing.NamedTuple):
+    version: int
+    magic: int
+    min_version: int
+
+    @staticmethod
+    def decode(data: bytes, offset: list[int], cur_version: int, exp_magic: int) -> LibtpmsHeader:
+        stru = struct.Struct('!HL')
+        version, magic = stru.unpack_from(data, offset[0])
+        offset[0] += stru.size
+        if magic != exp_magic:
+            raise Exception('Invalid magic')
+        if version >= 2:
+            min_version = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            if min_version > cur_version:
+                raise Exception('Unsupported version')
+        else:
+            min_version = 0
+        return LibtpmsHeader(version, magic, min_version)
+
+
+def decode_libtpms_string(data: bytes, offset: list[int]) -> bytes:
+    size = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += size + 2
+    return data[offset[0] - size:offset[0]]
+
+
+def libtpms_block_skip_read(data: bytes, offset: list[int], process):
+    has_block = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    blocksize = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result = None
+    if has_block:
+        if process is not None:
+            result = process(data[offset[0]:offset[0] + blocksize])
+        offset[0] += blocksize
+    return result
+
+
+def decode_libtpms_compile_constants(data: bytes, offset: list[int]):
+    exp_array_sizes = {1: 88, 2: 88, 3: 120}
+    hdr = LibtpmsHeader.decode(data, offset, 3, 0xc9ea6431)
+    array_size = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    if array_size != exp_array_sizes[hdr.version]:
+        raise Exception('Invalid PACompileConstants')
+    # TODO: Actually check these?
+    offset[0] += 4 * array_size
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+
+
+def decode_libtpms_pcr_policies(data: bytes):
+    result = []
+    offset = [0]
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x176be626)
+    array_size = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    for i in range(array_size):
+        result1 = {}
+        result1['hashAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+        result1['policy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+        result.append(result1)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_pcr_selection(data: bytes, offset: list[int]):
+    result = []
+    count = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    for i in range(count):
+        result1 = {}
+        result1['hash'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+        sizeofSelect = struct.unpack_from('!B', data, offset[0])[0]
+        offset[0] += 1
+        result1['pcrSelect'] = base64.b64encode(data[offset[0]:offset[0] + sizeofSelect]).decode()
+        offset[0] += sizeofSelect
+        result.append(result1)
+    return result
+
+
+def decode_libtpms_persistent_data_v4(data: bytes):
+    result = {}
+    offset = [0]
+    result['EPSeedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    result['SPSeedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    result['PPSeedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_persistent_data_v3(data: bytes):
+    result = {}
+    offset = [0]
+    result['shadowPcrAllocated'] = decode_libtpms_pcr_selection(data, offset)
+    result.update(libtpms_block_skip_read(data, offset, decode_libtpms_persistent_data_v4) or {})
+    return result
+
+
+def decode_libtpms_persistent_data(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 5, 0x12213443)
+    result['disableClear'] = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    result['ownerAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['endorsementAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['lockoutAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['ownerPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['endorsementPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['lockoutPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['ownerAuth'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['endorsementAuth'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['lockoutAuth'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['EPSeed'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['SPSeed'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['PPSeed'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['phProof'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['shProof'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['ehProof'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['totalResetCount'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['resetCount'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    pcr_policy = libtpms_block_skip_read(data, offset, decode_libtpms_pcr_policies)
+    if pcr_policy is not None:
+        result['pcrPolicies'] = pcr_policy
+    result['pcrAllocated'] = decode_libtpms_pcr_selection(data, offset)
+    pplist = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version <= 4:
+        result['ppListCompressed'] = pplist
+    else:
+        result['ppList'] = pplist
+    result['failedTries'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['maxTries'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['recoveryTime'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['lockoutRecovery'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['lockOutAuthEnabled'] = bool(struct.unpack_from('!B', data, offset[0])[0])
+    offset[0] += 1
+    result['orderlyState'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    auditCommands = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version <= 4:
+        result['auditCommandsCompressed'] = auditCommands
+    else:
+        result['auditCommands'] = auditCommands
+    result['auditHashAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['auditCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['algorithmSet'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['firmwareV1'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['firmwareV2'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    clocksize = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1 + clocksize
+    result['timeEpoch'] = int.from_bytes(data[offset[0] - clocksize:offset[0]])
+    if hdr.version >= 2:
+        result.update(
+            libtpms_block_skip_read(data, offset, decode_libtpms_persistent_data_v3) or {})
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
-    print(data)
-    raise Exception('Not yet implemented')
+    result = {}
+    offset = [0]
+    hdr = LibtpmsHeader.decode(data, offset, 4, 0xab364723)
+    if hdr.version >= 4:
+        result['profile'] = json.loads(decode_libtpms_string(data, offset))
+    decode_libtpms_compile_constants(data, offset)
+    result['persistent_data'] = decode_libtpms_persistent_data(data, offset)
+    # TODO ORDERLY_DATA -> check readSuState depending on version
+    # TODO STATE_RESET_DATA
+    # TODO STATE_CLEAR_DATA
+    # TODO INDEX_ORDERLY_RAM
+    # TODO USER_NVRAM
+    # TODO skip future versions
+    return result
 
 
 def decode_blob(data: bytes):
