@@ -231,6 +231,65 @@ def decode_libtpms_orderly_data(data: bytes, offset: list[int]):
     return result
 
 
+def decode_libtpms_state_reset_data_commitCounter(data: bytes):
+    result = {}
+    offset = [0]
+    result['commitCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['commitNonce'] = decode_libtpms_drbg_state(data, offset)
+    result['commitArray'] = decode_libtpms_drbg_state(data, offset)
+    return result
+
+
+def decode_libtpms_state_reset_data_v3(data: bytes):
+    result = {}
+    offset = [0]
+    result['nullSeedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_state_reset_data(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 4, 0x01102332)
+    result['nullProof'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['nullSeed'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['clearCount'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['objectContextID'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    size = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 1
+    contextArray = []
+    if hdr.version <= 3:
+        for i in range(size):
+            contextArray.append(struct.unpack_from('!B', data, offset[0])[0])
+            offset[0] += 1
+        contextSlotMask = 0xff
+    else:
+        for i in range(size):
+            contextArray.append(struct.unpack_from('!H', data, offset[0])[0])
+            offset[0] += 2
+        contextSlotMask = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+    result['contextArray'] = contextArray
+    result['contextSlotMask'] = contextSlotMask
+    result['contextCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['commandAuditDigest'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['restartCount'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['pcrCounter'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result.update(
+        libtpms_block_skip_read(data, offset, decode_libtpms_state_reset_data_commitCounter) or {})
+    if hdr.version >= 2:
+        result.update(
+            libtpms_block_skip_read(data, offset, decode_libtpms_state_reset_data_v3) or {})
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
     result = {}
     offset = [0]
@@ -240,7 +299,8 @@ def decode_libtpms_persistent_all(data: bytes):
     decode_libtpms_compile_constants(data, offset)
     result['persistent_data'] = decode_libtpms_persistent_data(data, offset)
     result['orderly_data'] = decode_libtpms_orderly_data(data, offset)
-    # TODO STATE_RESET_DATA
+    if hdr.version < 3 or result['persistent_data']['orderlyState'] % 16384 == 1:
+        result['state_reset_data'] = decode_libtpms_state_reset_data(data, offset)
     # TODO STATE_CLEAR_DATA
     # TODO INDEX_ORDERLY_RAM
     # TODO USER_NVRAM
