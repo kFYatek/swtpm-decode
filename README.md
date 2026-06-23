@@ -13,6 +13,13 @@ settings of BitLocker and a Windows Hello PIN, running under
 It is intended for educational purposes, to learn about the internals and inner
 workings of the TPM.
 
+## Relevant links
+
+More resources about the TPM:
+
+* https://blog.scrt.ch/2023/09/15/a-deep-dive-into-tpm-based-bitlocker-drive-encryption/
+* https://wiki.archlinux.org/title/Trusted_Platform_Module
+
 ## Legal disclaimers
 
 I, the author, don't care about what you do with this code. As far as I'm
