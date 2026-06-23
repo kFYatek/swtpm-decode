@@ -42,7 +42,7 @@ def libtpms_block_skip_read(data: bytes, offset: list[int], process):
     blocksize = struct.unpack_from('!H', data, offset[0])[0]
     offset[0] += 2
     result = None
-    if has_block:
+    if has_block and blocksize > 0:
         if process is not None:
             result = process(data[offset[0]:offset[0] + blocksize])
         offset[0] += blocksize
@@ -362,6 +362,229 @@ def decode_libtpms_index_orderly_ram(data: bytes, offset: list[int]):
     return result
 
 
+def decode_libtpms_nv_public(data: bytes, offset: list[int]):
+    result = {}
+    result['nvIndex'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['nameAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['attributes'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['authPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['dataSize'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    return result
+
+
+def decode_libtpms_nv_index(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x2547265a)
+    result['publicArea'] = decode_libtpms_nv_public(data, offset)
+    result['authValue'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_hash_object(data: bytes, offset: list[int]):
+    raise Exception('TODO')
+
+
+def decode_libtpms_public(data: bytes, offset: list[int]):
+    result = {}
+    result['type'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['nameAlg'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['objectAttributes'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['authPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    match result['type']:
+        case 0x08:  # KeyedHash
+            result['keyedHashDetail'] = {}
+            result['keyedHashDetail']['scheme'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            match result['keyedHashDetail']['scheme']:
+                case 0x05:
+                    result['keyedHashDetail']['hashAlg'] = \
+                        struct.unpack_from('!H', data, offset[0])[0]
+                    offset[0] += 2
+                case 0x0A:
+                    result['keyedHashDetail']['hashAlg'] = \
+                        struct.unpack_from('!H', data, offset[0])[0]
+                    offset[0] += 2
+                    result['keyedHashDetail']['kdf'] = struct.unpack_from('!H', data, offset[0])[0]
+                    offset[0] += 2
+                case 0x10:
+                    pass
+                case _:
+                    raise Exception('Unknown scheme')
+            raise Exception('TODO keyedHash public ID')
+        case 0x25:  # SymCipher
+            result['symDetail'] = {}
+            result['symDetail']['algorithm'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            match result['symDetail']['algorithm']:
+                case _:
+                    raise Exception('TODO Unknown algorithm')
+            raise Exception('TODO symCipher public ID')
+        case 0x01:  # RSA
+            result['rsaDetail'] = {}
+            result['rsaDetail']['symmetric'] = {}
+            result['rsaDetail']['symmetric']['algorithm'] = \
+                struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            if result['rsaDetail']['symmetric']['algorithm'] != 0x10:  # null
+                result['rsaDetail']['symmetric']['keyBits'] = \
+                    struct.unpack_from('!H', data, offset[0])[0]
+                offset[0] += 2
+            if result['rsaDetail']['symmetric']['algorithm'] not in (0x0a, 0x10):  # XOR, null
+                result['rsaDetail']['symmetric']['mode'] = \
+                    struct.unpack_from('!H', data, offset[0])[0]
+                offset[0] += 2
+            result['rsaDetail']['scheme'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            if result['rsaDetail']['scheme'] not in (0x10, 0x15):  # null, RSAES
+                result['rsaDetail']['schemeDetails'] = struct.unpack_from('!H', data, offset[0])[0]
+                offset[0] += 2
+            if result['rsaDetail']['scheme'] == 0x1A:  # ECDAA
+                result['rsaDetail']['schemeCount'] = struct.unpack_from('!H', data, offset[0])[0]
+                offset[0] += 2
+            result['rsaDetail']['keyBits'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            result['rsaDetail']['exponent'] = struct.unpack_from('!L', data, offset[0])[0]
+            offset[0] += 4
+            result['rsaPublicKey'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+        case 0x23:  # ECC
+            raise Exception('TODO ECC')
+        case _:
+            raise Exception('Unknown type')
+    return result
+
+
+def decode_libtpms_sensitive(data: bytes, offset: list[int]):
+    result = {}
+    result['type'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    result['authValue'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['seedValue'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    match result['type']:
+        case 0x01:  # RSA
+            result['rsaPrivateKey'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+        case 0x23:  # ECC
+            raise Exception('TODO ECC')
+        case 0x08:  # KeyedHash
+            raise Exception('TODO KeyedHash')
+        case 0x25:  # SymCipher
+            raise Exception('TODO SymCipher')
+        case _:
+            raise Exception('Unknown type')
+    return result
+
+
+def decode_libtpms_ci_prime(data: bytes, offset: list[int]):
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x2fe736ab)
+    result = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_object_privateExponent(data: bytes):
+    result = {}
+    offset = [0]
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x854eab2)
+    result['Q'] = decode_libtpms_ci_prime(data, offset)
+    result['dP'] = decode_libtpms_ci_prime(data, offset)
+    result['dQ'] = decode_libtpms_ci_prime(data, offset)
+    result['qInv'] = decode_libtpms_ci_prime(data, offset)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_object_v4(data: bytes):
+    result = {}
+    offset = [0]
+    result['hierarchy'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    return result
+
+
+def decode_libtpms_object_v3(data: bytes):
+    result = {}
+    offset = [0]
+    result['seedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
+    offset[0] += 1
+    result.update(libtpms_block_skip_read(data, offset, decode_libtpms_object_v4) or {})
+    return result
+
+
+def decode_libtpms_object(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 4, 0x75be73af)
+    result['publicArea'] = decode_libtpms_public(data, offset)
+    result['sensitive'] = decode_libtpms_sensitive(data, offset)
+    privateExponent = libtpms_block_skip_read(data, offset, decode_libtpms_object_privateExponent)
+    if privateExponent is not None:
+        result['privateExponent'] = privateExponent
+    result['qualifiedName'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    result['evictHandle'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    result['name'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+    if hdr.version >= 2:
+        result.update(libtpms_block_skip_read(data, offset, decode_libtpms_object_v3) or {})
+    return result
+
+
+def decode_libtpms_any_object(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0xfe9a3974)
+    result['attributes'] = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    if (result['attributes'] & (1 << 15)) != 0:
+        if (result['attributes'] & ((1 << 8) | (1 << 9) | (1 << 10))) != 0:
+            result['hash_object'] = decode_libtpms_hash_object(data, offset)
+        else:
+            result['object'] = decode_libtpms_object(data, offset)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
+def decode_libtpms_user_nvram(data: bytes, offset: list[int]):
+    result = {}
+    hdr = LibtpmsHeader.decode(data, offset, 2, 0x094f22c3)
+    sourceside_size = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    result['entries'] = []
+    while True:
+        result1 = {}
+        entrysize = struct.unpack_from('!L', data, offset[0])[0]
+        offset[0] += 4
+        if entrysize == 0:
+            break
+        result1['handle'] = struct.unpack_from('!L', data, offset[0])[0]
+        offset[0] += 4
+        match (result1['handle'] >> 24) % 256:
+            case 0x01:
+                result1['nvi'] = decode_libtpms_nv_index(data, offset)
+                datasize = struct.unpack_from('!L', data, offset[0])[0]
+                offset[0] += 4 + datasize
+                result1['data'] = base64.b64encode(data[offset[0] - datasize:offset[0]]).decode()
+                result['entries'].append(result1)
+            case 0x81:
+                result1['any_object'] = decode_libtpms_any_object(data, offset)
+                result['entries'].append(result1)
+            case _:
+                raise Exception('Unsupported handle type')
+    result['maxCount'] = struct.unpack_from('!Q', data, offset[0])[0]
+    offset[0] += 8
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    return result
+
+
 def decode_libtpms_persistent_all(data: bytes):
     result = {}
     offset = [0]
@@ -375,8 +598,13 @@ def decode_libtpms_persistent_all(data: bytes):
         result['state_reset_data'] = decode_libtpms_state_reset_data(data, offset)
         result['state_clear_data'] = decode_libtpms_state_clear_data(data, offset)
     result['index_orderly_ram'] = decode_libtpms_index_orderly_ram(data, offset)
-    # TODO USER_NVRAM
-    # TODO skip future versions
+    result['user_nvram'] = decode_libtpms_user_nvram(data, offset)
+    if hdr.version >= 2:
+        libtpms_block_skip_read(data, offset, None)
+    footer = struct.unpack_from('!L', data, offset[0])[0]
+    offset[0] += 4
+    if footer != 0xab364723:
+        raise Exception('Bad footer magic')
     return result
 
 
@@ -463,6 +691,7 @@ def _main(*args):
     parser.add_argument('tpmdata', type=str, help='Input file')
     args = parser.parse_args(args)
     json.dump(decode_file(args.tpmdata), sys.stdout, indent=4)
+    sys.stdout.write('\n')
 
 
 if __name__ == '__main__':
