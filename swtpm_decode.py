@@ -232,6 +232,7 @@ def decode_libtpms_orderly_data(data: bytes, offset: list[int]):
 
 
 def decode_libtpms_state_reset_data_commitCounter(data: bytes):
+    # WARNING: Untested code
     result = {}
     offset = [0]
     result['commitCounter'] = struct.unpack_from('!Q', data, offset[0])[0]
@@ -242,6 +243,7 @@ def decode_libtpms_state_reset_data_commitCounter(data: bytes):
 
 
 def decode_libtpms_state_reset_data_v3(data: bytes):
+    # WARNING: Untested code
     result = {}
     offset = [0]
     result['nullSeedCompatLevel'] = struct.unpack_from('!B', data, offset[0])[0]
@@ -251,6 +253,7 @@ def decode_libtpms_state_reset_data_v3(data: bytes):
 
 
 def decode_libtpms_state_reset_data(data: bytes, offset: list[int]):
+    # WARNING: Untested code
     result = {}
     hdr = LibtpmsHeader.decode(data, offset, 4, 0x01102332)
     result['nullProof'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
@@ -291,6 +294,7 @@ def decode_libtpms_state_reset_data(data: bytes, offset: list[int]):
 
 
 def decode_libtpms_pcr_save(data: bytes, offset: list[int]):
+    # WARNING: Untested code
     result = []
     hdr = LibtpmsHeader.decode(data, offset, 2, 0x7372eabc)
     arraysize = struct.unpack_from('!H', data, offset[0])[0]
@@ -309,6 +313,7 @@ def decode_libtpms_pcr_save(data: bytes, offset: list[int]):
 
 
 def decode_libtpms_pcr_authvalues(data: bytes, offset: list[int]):
+    # WARNING: Untested code
     result = []
     hdr = LibtpmsHeader.decode(data, offset, 2, 0x6be82eaf)
     arraysize = struct.unpack_from('!H', data, offset[0])[0]
@@ -321,6 +326,7 @@ def decode_libtpms_pcr_authvalues(data: bytes, offset: list[int]):
 
 
 def decode_libtpms_state_clear_data(data: bytes, offset: list[int]):
+    # WARNING: Untested code
     result = {}
     hdr = LibtpmsHeader.decode(data, offset, 2, 0x98897667)
     result['shEnable'] = bool(struct.unpack_from('!B', data, offset[0])[0])
@@ -401,6 +407,7 @@ def decode_libtpms_public(data: bytes, offset: list[int]):
     result['authPolicy'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
     match result['type']:
         case 0x08:  # KeyedHash
+            # WARNING: Untested and incomplete code
             result['keyedHashDetail'] = {}
             result['keyedHashDetail']['scheme'] = struct.unpack_from('!H', data, offset[0])[0]
             offset[0] += 2
@@ -421,6 +428,7 @@ def decode_libtpms_public(data: bytes, offset: list[int]):
                     raise Exception('Unknown scheme')
             raise Exception('TODO keyedHash public ID')
         case 0x25:  # SymCipher
+            # WARNING: Untested and incomplete code
             result['symDetail'] = {}
             result['symDetail']['algorithm'] = struct.unpack_from('!H', data, offset[0])[0]
             offset[0] += 2
