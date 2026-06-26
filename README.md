@@ -1,17 +1,21 @@
 # swtpm_decode
 
 This is a quick and dirty script that intends to show contents of persistence
-files used by [swtpm](https://github.com/stefanberger/swtpm), which is commonly
-used to emulate the Trusted Platform Module on virtual machines that use the
-QEMU engine (including KVM, libvirt, UTM, etc.).
+data used by [swtpm](https://github.com/stefanberger/swtpm) and
+[libtpms](https://github.com/stefanberger/libtpms), which is commonly used to
+emulate the Trusted Platform Module on virtual machines that use the QEMU engine
+(including KVM, libvirt, UTM, etc.) as well as VirtualBox.
 
-Currently, it only supports a subset of the format that was enough to decode the
-file created by performing a clean installation of Windows 11 ARM64 with default
-settings of BitLocker and a Windows Hello PIN, running under
-[UTM](https://github.com/utmapp/UTM/) 4.7.5 (QEMU 10.0.2 and swtpm 0.9.0), and
-the one created by an installation with Ubuntu 26.04 x86_64 with TPM-backed
-encryption in virt-manager, also under Ubuntu 26.04 (QEMU 10.2.1 and swtpm
-0.10.1).
+The tool dynamically searches for libtpms persistence magic, so it should work
+with any format that embeds this information without encryption, including
+linear `swtpm` files (e.g. `tpmdata` used by UTM), `tpm2-00.permall` files found
+in`swtpm` directories (used by e.g. libvirt) and `*.nvram` files used by
+VirtualBox.
+
+Currently, it only supports a subset of the format that was enough to decode
+data encounter on a couple of test virtual machines running Windows 11 and
+Ubuntu 26.04 under QEMU 10.x and VirtualBox 7.2, using libtpms 0.9.0 through
+0.10.2.
 
 It is intended for educational purposes, to learn about the internals and inner
 workings of the TPM.

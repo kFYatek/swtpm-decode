@@ -611,10 +611,12 @@ def decode_libtpms_user_nvram(data: bytes, offset: list[int]):
     return result
 
 
-def decode_libtpms_persistent_all(data: bytes):
+LIBTPMS_PERSISTENT_ALL_MAGIC = b'\xab\x36\x47\x23'
+
+
+def decode_libtpms_persistent_all(data: bytes, offset: list[int]):
     result = {}
-    offset = [0]
-    hdr = LibtpmsHeader.decode(data, offset, 4, 0xab364723)
+    hdr = LibtpmsHeader.decode(data, offset, 4, int.from_bytes(LIBTPMS_PERSISTENT_ALL_MAGIC))
     if hdr.version >= 4:
         result['profile'] = json.loads(decode_libtpms_string(data, offset).strip(b'\t\n\v\f\r \0'))
     decode_libtpms_compile_constants(data, offset)
@@ -629,95 +631,38 @@ def decode_libtpms_persistent_all(data: bytes):
         libtpms_block_skip_read(data, offset, None)
     footer = struct.unpack_from('!L', data, offset[0])[0]
     offset[0] += 4
-    if footer != 0xab364723:
+    if footer != int.from_bytes(LIBTPMS_PERSISTENT_ALL_MAGIC):
         raise Exception('Bad footer magic')
     return result
 
 
-def decode_blob(data: bytes):
-    offset = 0
-
-    class TlvHeader(typing.NamedTuple):
-        tag: int
-        length: int
-
-    tlvheader_str = struct.Struct('!HL')
-
-    class BlobHeader(typing.NamedTuple):
-        version: int
-        min_version: int
-        hdrsize: int
-        flags: int
-        totlen: int
-
-    blobheader_str = struct.Struct('!BBHHL')
-    bh = BlobHeader(*blobheader_str.unpack_from(data, offset))
-    offset += blobheader_str.size
-    if bh.totlen != len(data) or bh.hdrsize != blobheader_str.size:
-        raise Exception('Broken blob header')
-    if bh.min_version > 2:
-        raise Exception('Unsupported version')
-    match bh.version:
-        case 1:
-            return decode_libtpms_persistent_all(data[offset:])
-        case 2:
-            while offset < len(data):
-                tlvhdr = TlvHeader(*tlvheader_str.unpack_from(data, offset))
-                offset += tlvheader_str.size
-                if tlvhdr.tag == 1:
-                    assert offset + tlvhdr.length <= len(data)
-                    return decode_libtpms_persistent_all(data[offset:offset + tlvhdr.length])
-                else:
-                    offset += tlvhdr.length
-            raise Exception('Unencrypted data not found in the file')
-        case _:
-            raise Exception('Unsupported version')
+def decode_data(data: bytes, offset: typing.Optional[int] = None):
+    if offset is None:
+        header_magic_offset = data.find(LIBTPMS_PERSISTENT_ALL_MAGIC)
+        if header_magic_offset < 2:
+            raise Exception('libtpms magic header not found')
+        footer_magic_offset = data.find(LIBTPMS_PERSISTENT_ALL_MAGIC, header_magic_offset + 6)
+        if footer_magic_offset < 0:
+            raise Exception('libtpms magic footer not found')
+        if data.find(LIBTPMS_PERSISTENT_ALL_MAGIC, footer_magic_offset + 4) >= 0:
+            raise Warning(
+                'libtpms magic found multiple times, consider specifying the offset explicitly')
+        offset = header_magic_offset - 2
+    return decode_libtpms_persistent_all(data, [offset])
 
 
-def decode_data(data: bytes):
-    offset = 0
-    globalheader_str = struct.Struct('=QBBH')
-    magic, version, _padding, hdrsize = globalheader_str.unpack_from(data, offset)
-    offset += globalheader_str.size
-    if magic != 0x737774706d6c696e:
-        # Invalid magic - this may be a raw unwrapped file, try that
-        return decode_blob(data)
-    if version != 1:
-        raise Exception('Invalid version')
-
-    class FileHeader(typing.NamedTuple):
-        offset: int
-        data_length: int
-        section_length: int
-
-    fileheader_str = struct.Struct('=LLL')
-    fileheaders = []
-    while offset < hdrsize:
-        fileheaders.append(FileHeader(*fileheader_str.unpack_from(data, offset)))
-        offset += fileheader_str.size
-    assert offset == hdrsize
-    i = 0
-    while i < len(fileheaders):
-        if fileheaders[i].offset == 0:
-            del fileheaders[i]
-        else:
-            i += 1
-    if len(fileheaders) != 1:
-        raise Exception('Only SWTPM files with exactly one blob are supported')
-    return decode_blob(
-        data[fileheaders[0].offset:fileheaders[0].offset + fileheaders[0].data_length])
-
-
-def decode_file(filename: str):
+def decode_file(filename: str, offset: typing.Optional[int] = None):
     with open(filename, 'rb') as f:
-        return decode_data(f.read())
+        return decode_data(f.read(), offset)
 
 
 def _main(*args):
-    parser = argparse.ArgumentParser(description='Decode a SWTPM linear persistence file.')
+    parser = argparse.ArgumentParser(description='Decode libtpms persistence data.')
     parser.add_argument('tpmdata', type=str, help='Input file')
+    parser.add_argument('--offset', type=int, nargs='?',
+                        help='Offset at which libtpms persistence data starts. Magic data VV VV AB 36 47 23 (VV VV being the version number) shall be found at this offset.')
     args = parser.parse_args(args)
-    json.dump(decode_file(args.tpmdata), sys.stdout, indent=4)
+    json.dump(decode_file(args.tpmdata, args.offset), sys.stdout, indent=4)
     sys.stdout.write('\n')
 
 
