@@ -396,6 +396,32 @@ def decode_libtpms_hash_object(data: bytes, offset: list[int]):
     raise Exception('TODO')
 
 
+def decode_libtpms_public_symmetric(data: bytes, offset: list[int]):
+    result = {}
+    result['algorithm'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    if result['algorithm'] != 0x10:  # null
+        result['keyBits'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+    if result['algorithm'] not in (0x0a, 0x10):  # XOR, null
+        result['mode'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+    return result
+
+
+def decode_libtpms_asym_scheme(data: bytes, offset: list[int]):
+    result = {}
+    result['scheme'] = struct.unpack_from('!H', data, offset[0])[0]
+    offset[0] += 2
+    if result['scheme'] not in (0x10, 0x15):  # null, RSAES
+        result['schemeDetails'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+    if result['scheme'] == 0x1A:  # ECDAA
+        result['schemeCount'] = struct.unpack_from('!H', data, offset[0])[0]
+        offset[0] += 2
+    return result
+
+
 def decode_libtpms_public(data: bytes, offset: list[int]):
     result = {}
     result['type'] = struct.unpack_from('!H', data, offset[0])[0]
@@ -437,34 +463,26 @@ def decode_libtpms_public(data: bytes, offset: list[int]):
                     raise Exception('TODO Unknown algorithm')
             raise Exception('TODO symCipher public ID')
         case 0x01:  # RSA
-            result['rsaDetail'] = {}
-            result['rsaDetail']['symmetric'] = {}
-            result['rsaDetail']['symmetric']['algorithm'] = \
-                struct.unpack_from('!H', data, offset[0])[0]
-            offset[0] += 2
-            if result['rsaDetail']['symmetric']['algorithm'] != 0x10:  # null
-                result['rsaDetail']['symmetric']['keyBits'] = \
-                    struct.unpack_from('!H', data, offset[0])[0]
-                offset[0] += 2
-            if result['rsaDetail']['symmetric']['algorithm'] not in (0x0a, 0x10):  # XOR, null
-                result['rsaDetail']['symmetric']['mode'] = \
-                    struct.unpack_from('!H', data, offset[0])[0]
-                offset[0] += 2
-            result['rsaDetail']['scheme'] = struct.unpack_from('!H', data, offset[0])[0]
-            offset[0] += 2
-            if result['rsaDetail']['scheme'] not in (0x10, 0x15):  # null, RSAES
-                result['rsaDetail']['schemeDetails'] = struct.unpack_from('!H', data, offset[0])[0]
-                offset[0] += 2
-            if result['rsaDetail']['scheme'] == 0x1A:  # ECDAA
-                result['rsaDetail']['schemeCount'] = struct.unpack_from('!H', data, offset[0])[0]
-                offset[0] += 2
+            result['rsaDetail'] = {'symmetric': decode_libtpms_public_symmetric(data, offset)}
+            result['rsaDetail'].update(decode_libtpms_asym_scheme(data, offset))
             result['rsaDetail']['keyBits'] = struct.unpack_from('!H', data, offset[0])[0]
             offset[0] += 2
             result['rsaDetail']['exponent'] = struct.unpack_from('!L', data, offset[0])[0]
             offset[0] += 4
             result['rsaPublicKey'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
         case 0x23:  # ECC
-            raise Exception('TODO ECC')
+            result['eccDetail'] = {'symmetric': decode_libtpms_public_symmetric(data, offset)}
+            result['eccDetail'].update(decode_libtpms_asym_scheme(data, offset))
+            result['eccDetail']['curve'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            result['eccDetail']['kdf'] = struct.unpack_from('!H', data, offset[0])[0]
+            offset[0] += 2
+            if result['eccDetail']['kdf'] != 0x10:  # null
+                result['eccDetail']['kdfDetail'] = struct.unpack_from('!H', data, offset[0])[0]
+                offset[0] += 2
+            result['eccPoint'] = {}
+            result['eccPoint']['x'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
+            result['eccPoint']['y'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
         case _:
             raise Exception('Unknown type')
     return result
@@ -480,7 +498,7 @@ def decode_libtpms_sensitive(data: bytes, offset: list[int]):
         case 0x01:  # RSA
             result['rsaPrivateKey'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
         case 0x23:  # ECC
-            raise Exception('TODO ECC')
+            result['eccPrivateKey'] = base64.b64encode(decode_libtpms_string(data, offset)).decode()
         case 0x08:  # KeyedHash
             raise Exception('TODO KeyedHash')
         case 0x25:  # SymCipher

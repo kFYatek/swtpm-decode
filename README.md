@@ -8,7 +8,10 @@ QEMU engine (including KVM, libvirt, UTM, etc.).
 Currently, it only supports a subset of the format that was enough to decode the
 file created by performing a clean installation of Windows 11 ARM64 with default
 settings of BitLocker and a Windows Hello PIN, running under
-[UTM](https://github.com/utmapp/UTM/) 4.7.5 (QEMU 10.0.2 and swtpm 0.9.0).
+[UTM](https://github.com/utmapp/UTM/) 4.7.5 (QEMU 10.0.2 and swtpm 0.9.0), and
+the one created by an installation with Ubuntu 26.04 x86_64 with TPM-backed
+encryption in virt-manager, also under Ubuntu 26.04 (QEMU 10.2.1 and swtpm
+0.10.1).
 
 It is intended for educational purposes, to learn about the internals and inner
 workings of the TPM.
