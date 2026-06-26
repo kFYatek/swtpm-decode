@@ -598,7 +598,7 @@ def decode_libtpms_persistent_all(data: bytes):
     offset = [0]
     hdr = LibtpmsHeader.decode(data, offset, 4, 0xab364723)
     if hdr.version >= 4:
-        result['profile'] = json.loads(decode_libtpms_string(data, offset))
+        result['profile'] = json.loads(decode_libtpms_string(data, offset).strip(b'\t\n\v\f\r \0'))
     decode_libtpms_compile_constants(data, offset)
     result['persistent_data'] = decode_libtpms_persistent_data(data, offset)
     result['orderly_data'] = decode_libtpms_orderly_data(data, offset)
@@ -662,7 +662,8 @@ def decode_data(data: bytes):
     magic, version, _padding, hdrsize = globalheader_str.unpack_from(data, offset)
     offset += globalheader_str.size
     if magic != 0x737774706d6c696e:
-        raise Exception('Invalid magic')
+        # Invalid magic - this may be a raw unwrapped file, try that
+        return decode_blob(data)
     if version != 1:
         raise Exception('Invalid version')
 
